@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CloudCart - serverless order platform (Block L skeleton)
+
+# ---------------------------------------------------------------------------
+# SKELETON: complete every TODO, then:
+#   sam validate --lint
+#   sam build
+#   sam deploy --guided --stack-name cc-<id>-sam --capabilities CAPABILITY_IAM
+# Rules: no hard-coded resource names (no TableName / QueueName / BucketName),
+#        least-privilege SAM policy templates, tag resources Project=CloudCart.
+# It will not validate until the TODO resources referenced below exist.
+# ---------------------------------------------------------------------------
+
+Parameters:
+  UserPoolArn:
+    Type: String
+    Description: ARN of your existing Cognito user pool (cc-<id>-users)
+  NotificationEmail:
+    Type: String
+    Description: Email that receives order confirmations
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+    Tags:
+      Project: CloudCart
+
+Resources:
+
+  # ---------------- API (done for you) ----------------
+  CloudCartApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      TracingEnabled: true
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+      Auth:
+        DefaultAuthorizer: CognitoAuth
+        AddDefaultAuthorizerToCorsPreflight: false   # OPTIONS must not need a token
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn: !Ref UserPoolArn
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          ThrottlingRateLimit: 50
+          ThrottlingBurstLimit: 100
+      Tags:
+        Project: CloudCart
+
+  # ---------------- Database ----------------
+  # TODO ProductsTable: AWS::DynamoDB::Table
+  #   PAY_PER_REQUEST, partition key productId (S)
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: orderId, AttributeType: S }
+        # TODO add userId (S) and createdAt (N) - needed by the GSI
+      KeySchema:
+        - { AttributeName: orderId, KeyType: HASH }
+      # TODO GlobalSecondaryIndexes: userId-createdAt-index
+      #   HASH userId, RANGE createdAt, Projection ALL
+      Tags:
+        - { Key: Project, Value: CloudCart }
+
+  # ---------------- Queue ----------------
+  # TODO OrdersDLQ: AWS::SQS::Queue
+
+  # TODO OrdersQueue: AWS::SQS::Queue
+  #   VisibilityTimeout 60
+  #   RedrivePolicy: deadLetterTargetArn = OrdersDLQ Arn, maxReceiveCount 3
+
+  # ---------------- Notifications + receipts ----------------
+  # TODO OrderEventsTopic: AWS::SNS::Topic
+  #   Subscription: email -> !Ref NotificationEmail
+
+  # TODO ReceiptsBucket: AWS::S3::Bucket
+  #   PublicAccessBlockConfiguration: all four settings true
+
+  # ---------------- Lambdas ----------------
+  # TODO ProductsFn
+  #   CodeUri src/products/   Env PRODUCTS_TABLE
+  #   Policy: DynamoDBReadPolicy on ProductsTable
+  #   Event: Api GET /products (RestApiId: !Ref CloudCartApi)
+
+  OrdersFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/orders/
+      Handler: app.handler
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTable
+          QUEUE_URL: !Ref OrdersQueue
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref OrdersTable }
+        - SQSSendMessagePolicy: { QueueName: !GetAtt OrdersQueue.QueueName }
+      Events:
+        PostOrder:
+          Type: Api
+          Properties: { RestApiId: !Ref CloudCartApi, Path: /orders, Method: post }
+        # TODO ListOrders: GET /orders
+        # TODO GetOrder:   GET /orders/{id}
+
+  # TODO WorkerFn
+  #   CodeUri src/worker/   Env STATE_MACHINE_ARN: !Ref OrderWorkflow
+  #   Policy: StepFunctionsExecutionPolicy (StateMachineName: !GetAtt OrderWorkflow.Name)
+  #   Event: Type SQS, Queue = OrdersQueue Arn, BatchSize 1
+
+  # TODO ReserveStockFn
+  #   CodeUri src/reserve_stock/   Env PRODUCTS_TABLE
+  #   Policy: DynamoDBCrudPolicy on ProductsTable
+
+  # TODO ReceiptFn
+  #   CodeUri src/receipt/   Env RECEIPTS_BUCKET
+  #   Policy: S3WritePolicy on ReceiptsBucket
+
+  # ---------------- Workflow ----------------
+  # TODO OrderWorkflow: AWS::Serverless::StateMachine
+  #   Type STANDARD, Tracing Enabled
+  #   DefinitionUri: statemachine/order_workflow.asl.json
+  #   DefinitionSubstitutions (names must match the JSON):
+  #     ReserveStockFnArn, ReceiptFnArn, OrdersTableName, OrderEventsTopicArn
+  #   Policies: LambdaInvokePolicy (x2), DynamoDBWritePolicy (OrdersTable),
+  #             SNSPublishMessagePolicy (OrderEventsTopic)
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the new API (add /products or /orders)
+    Value: !Sub "https://${CloudCartApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  # TODO ProductsTableName output - you must seed the new table before testing
+  # TODO ReceiptsBucketName output - empty it before sam delete
