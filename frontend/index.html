@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudCart</title>
+<style>
+  :root {
+    --navy: #1d2b4f;
+    --navy-2: #2c3e6b;
+    --orange: #e8772e;
+    --paper: #f5f6f9;
+    --line: #dde1ea;
+    --ink: #1f2430;
+    --muted: #5d6576;
+    --ok: #1f7a4d;
+    --bad: #b3261e;
+    --wait: #8a5a00;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: var(--paper); }
+  header { background: var(--navy); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: .5px; }
+  header h1 span { color: var(--orange); }
+  header .who { margin-left: auto; font-size: 14px; color: #c9d3ea; }
+  main { max-width: 1040px; margin: 24px auto; padding: 0 20px; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
+  h2 { font-size: 17px; margin: 0 0 12px; color: var(--navy); }
+  .grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=email], input[type=password] { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  button { font: inherit; border-radius: 6px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--navy); background: var(--navy); color: #fff; }
+  button.secondary { background: #fff; color: var(--navy); }
+  button.accent { background: var(--orange); border-color: var(--orange); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
+  header button { border-color: #fff; background: transparent; white-space: nowrap; }
+  .login { max-width: 380px; margin: 40px auto; }
+  .login .row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 6px; border-bottom: 1px solid var(--line); }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .qty { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 6px; }
+  .qty button { background: #fff; color: var(--navy); border: 0; padding: 4px 10px; }
+  .qty span { min-width: 28px; text-align: center; }
+  .cart-line { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .total { display: flex; justify-content: space-between; font-weight: 700; margin: 12px 0; }
+  .empty { color: var(--muted); }
+  .orders { margin-top: 20px; }
+  .ticket { border: 1px solid var(--line); border-left: 6px solid var(--line); border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .ticket.PENDING { border-left-color: var(--wait); }
+  .ticket.CONFIRMED { border-left-color: var(--ok); }
+  .ticket.FAILED { border-left-color: var(--bad); }
+  .ticket code { font-size: 12px; color: var(--muted); }
+  .stamp { font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 4px; border: 2px solid currentColor; align-self: start; }
+  .PENDING .stamp { color: var(--wait); }
+  .CONFIRMED .stamp { color: var(--ok); }
+  .FAILED .stamp { color: var(--bad); }
+  .meta { font-size: 13px; color: var(--muted); grid-column: 1 / -1; }
+  .msg { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
+  .msg.error { background: #fdecea; color: var(--bad); }
+  .msg.info { background: #eef2fb; color: var(--navy-2); }
+  .hidden { display: none !important; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Cloud<span>Cart</span></h1>
+  <div class="who" id="who"></div>
+  <button id="signOutBtn" class="hidden" type="button">Sign out</button>
+</header>
+
+<main>
+  <div id="msg" class="msg hidden" role="status"></div>
+
+  <!-- Signed out -->
+  <section id="loginView" class="panel login hidden">
+    <h2>Sign in</h2>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <div class="row">
+      <button id="signInBtn" type="button">Sign in</button>
+      <button id="hostedBtn" class="secondary hidden" type="button">Use Cognito sign-in page</button>
+    </div>
+  </section>
+
+  <!-- Signed in -->
+  <section id="shopView" class="hidden">
+    <div class="grid">
+      <div class="panel">
+        <div class="toolbar">
+          <h2>Products</h2>
+          <button id="reloadProductsBtn" class="secondary" type="button">Reload</button>
+        </div>
+        <table>
+          <thead><tr><th>Item</th><th class="num">Price</th><th class="num">In stock</th><th class="num">Qty</th></tr></thead>
+          <tbody id="productRows"><tr><td colspan="4" class="empty">Loading products...</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>Your order</h2>
+        <div id="cartLines" class="empty">Choose a quantity to add items.</div>
+        <div class="total"><span>Total</span><span id="cartTotal">0</span></div>
+        <button id="placeOrderBtn" class="accent" type="button" disabled>Place order</button>
+      </div>
+    </div>
+
+    <div class="panel orders">
+      <div class="toolbar">
+        <h2>My orders</h2>
+        <button id="reloadOrdersBtn" class="secondary" type="button">Refresh</button>
+      </div>
+      <div id="orderList" class="empty">No orders yet.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* =====================================================================
+   CONFIG - fill these in (Blocks C and F), then upload to the S3 bucket
+   ===================================================================== */
+const CONFIG = {
+  REGION: "us-east-1",
+  CLIENT_ID: "",            // Cognito app client ID (no secret)
+  API_URL: "",              // e.g. https://abc123.execute-api.us-east-1.amazonaws.com/prod  (no trailing slash)
+  HOSTED_UI_DOMAIN: "",     // optional, e.g. https://cc-ab7.auth.us-east-1.amazoncognito.com
+  REDIRECT_URI: location.origin + "/",  // must match the Cognito callback URL exactly
+  CURRENCY: "\u20B9"
+};
+/* ===================================================================== */
+
+const $ = (id) => document.getElementById(id);
+const state = { products: [], cart: {}, pollTimer: null };
+
+function showMsg(text, kind = "info") {
+  const m = $("msg");
+  m.textContent = text;
+  m.className = "msg " + kind;
+}
+function clearMsg() { $("msg").className = "msg hidden"; }
+function money(n) { return CONFIG.CURRENCY + Number(n).toLocaleString("en-IN"); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ---------- Token handling ---------- */
+function decodeJwt(t) {
+  const p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(decodeURIComponent(atob(p).split("").map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join("")));
+}
+function getToken() {
+  const t = sessionStorage.getItem("idToken");
+  if (!t) return null;
+  try {
+    if (decodeJwt(t).exp * 1000 < Date.now()) { sessionStorage.removeItem("idToken"); return null; }
+  } catch { return null; }
+  return t;
+}
+function setToken(t) { sessionStorage.setItem("idToken", t); }
+
+/* ---------- Sign in: email + password (USER_PASSWORD_AUTH) ---------- */
+async function signIn() {
+  clearMsg();
+  const email = $("email").value.trim(), password = $("password").value;
+  if (!email || !password) return showMsg("Enter your email and password.", "error");
+  $("signInBtn").disabled = true;
+  try {
+    const res = await fetch(`https://cognito-idp.${CONFIG.REGION}.amazonaws.com/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-amz-json-1.1",
+        "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth"
+      },
+      body: JSON.stringify({
+        AuthFlow: "USER_PASSWORD_AUTH",
+        ClientId: CONFIG.CLIENT_ID,
+        AuthParameters: { USERNAME: email, PASSWORD: password }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || data.__type || "Sign-in failed");
+    if (data.ChallengeName) {
+      throw new Error(`Cognito asked for ${data.ChallengeName}. Set a permanent password for this user (Block C step 4) and try again.`);
+    }
+    setToken(data.AuthenticationResult.IdToken);   // ID token, not access token
+    render();
+  } catch (e) {
+    showMsg(e.message, "error");
+  } finally {
+    $("signInBtn").disabled = false;
+  }
+}
+
+/* ---------- Sign in: Cognito hosted page (authorization code + PKCE) ---------- */
+function b64url(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+async function hostedSignIn() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  sessionStorage.setItem("pkce", verifier);
+  const q = new URLSearchParams({
+    response_type: "code", client_id: CONFIG.CLIENT_ID, redirect_uri: CONFIG.REDIRECT_URI,
+    scope: "openid email", code_challenge_method: "S256", code_challenge: challenge
+  });
+  location.href = `${CONFIG.HOSTED_UI_DOMAIN}/oauth2/authorize?${q}`;
+}
+async function finishHostedSignIn() {
+  const code = new URLSearchParams(location.search).get("code");
+  if (!code) return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const res = await fetch(`${CONFIG.HOSTED_UI_DOMAIN}/oauth2/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code", client_id: CONFIG.CLIENT_ID, code,
+        redirect_uri: CONFIG.REDIRECT_URI, code_verifier: sessionStorage.getItem("pkce") || ""
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Hosted sign-in failed");
+    setToken(data.id_token);
+  } catch (e) {
+    showMsg(e.message + ". Check the callback URL matches " + CONFIG.REDIRECT_URI, "error");
+  }
+}
+
+function signOut() {
+  sessionStorage.removeItem("idToken");
+  clearInterval(state.pollTimer);
+  state.cart = {};
+  if (CONFIG.HOSTED_UI_DOMAIN) {
+    const q = new URLSearchParams({ client_id: CONFIG.CLIENT_ID, logout_uri: CONFIG.REDIRECT_URI });
+    location.href = `${CONFIG.HOSTED_UI_DOMAIN}/logout?${q}`;
+    return;
+  }
+  render();
+}
+
+/* ---------- API ---------- */
+async function api(path, options = {}) {
+  const token = getToken();
+  if (!token) { render(); throw new Error("Your session expired. Sign in again."); }
+  const res = await fetch(CONFIG.API_URL + path, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: token, ...(options.headers || {}) }
+  });
+  if (res.status === 401) {
+    sessionStorage.removeItem("idToken");
+    render();
+    throw new Error("401 Unauthorized: token rejected by the Cognito authorizer.");
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || `Request failed (${res.status})`);
+  return body;
+}
+
+/* ---------- Products + cart ---------- */
+async function loadProducts() {
+  try {
+    const data = await api("/products");
+    state.products = data.products || [];
+    renderProducts();
+  } catch (e) {
+    $("productRows").innerHTML = `<tr><td colspan="4" class="empty">${esc(e.message)}</td></tr>`;
+  }
+}
+function renderProducts() {
+  if (!state.products.length) {
+    $("productRows").innerHTML = `<tr><td colspan="4" class="empty">No products. Seed the Products table (Block D).</td></tr>`;
+    return;
+  }
+  $("productRows").innerHTML = state.products.map(p => `
+    <tr>
+      <td>${esc(p.name)}</td>
+      <td class="num">${money(p.price)}</td>
+      <td class="num">${esc(p.stock)}</td>
+      <td class="num">
+        <span class="qty">
+          <button type="button" aria-label="Remove one ${esc(p.name)}" data-id="${esc(p.productId)}" data-d="-1">&minus;</button>
+          <span>${state.cart[p.productId] || 0}</span>
+          <button type="button" aria-label="Add one ${esc(p.name)}" data-id="${esc(p.productId)}" data-d="1">+</button>
+        </span>
+      </td>
+    </tr>`).join("");
+  renderCart();
+}
+function changeQty(id, d) {
+  const q = Math.max(0, (state.cart[id] || 0) + d);
+  if (q) state.cart[id] = q; else delete state.cart[id];
+  renderProducts();
+}
+function renderCart() {
+  const lines = Object.entries(state.cart).map(([id, qty]) => {
+    const p = state.products.find(x => x.productId === id) || { name: id, price: 0 };
+    return { name: p.name, qty, total: p.price * qty };
+  });
+  $("cartLines").innerHTML = lines.length
+    ? lines.map(l => `<div class="cart-line"><span>${esc(l.name)} &times; ${l.qty}</span><span>${money(l.total)}</span></div>`).join("")
+    : "Choose a quantity to add items.";
+  $("cartLines").className = lines.length ? "" : "empty";
+  $("cartTotal").textContent = money(lines.reduce((s, l) => s + l.total, 0));
+  $("placeOrderBtn").disabled = !lines.length;
+}
+async function placeOrder() {
+  const items = Object.entries(state.cart).map(([productId, qty]) => ({ productId, qty }));
+  $("placeOrderBtn").disabled = true;
+  try {
+    const data = await api("/orders", { method: "POST", body: JSON.stringify({ items }) });
+    showMsg(`Order placed (${data.orderId}). Status: ${data.status}. Watch it update below.`, "info");
+    state.cart = {};
+    renderProducts();
+    loadOrders();
+  } catch (e) {
+    showMsg(e.message, "error");
+    renderCart();
+  }
+}
+
+/* ---------- Orders ---------- */
+async function loadOrders() {
+  try {
+    const data = await api("/orders");
+    renderOrders(data.orders || []);
+  } catch (e) {
+    $("orderList").innerHTML = `<span class="empty">${esc(e.message)}</span>`;
+  }
+}
+function renderOrders(orders) {
+  if (!orders.length) { $("orderList").innerHTML = `<span class="empty">No orders yet.</span>`; return; }
+  $("orderList").className = "";
+  $("orderList").innerHTML = orders.map(o => {
+    const items = (o.items || []).map(i => `${esc(i.name || (state.products.find(x => x.productId === i.productId) || {}).name || i.productId)} &times; ${esc(i.qty)}`).join(", ");
+    const when = o.createdAt ? new Date(o.createdAt * 1000).toLocaleString() : "";
+    const extra = o.status === "CONFIRMED"
+      ? `Total ${money(o.total || 0)}. Receipt: <code>${esc(o.receiptKey || "")}</code>`
+      : o.status === "FAILED" ? `Reason: ${esc(o.reason || "unknown")}` : "Processing...";
+    return `<div class="ticket ${esc(o.status)}">
+      <div><strong>${items}</strong><br><code>${esc(o.orderId)}</code></div>
+      <span class="stamp">${esc(o.status)}</span>
+      <div class="meta">${esc(when)} &nbsp; ${extra}</div>
+    </div>`;
+  }).join("");
+
+  // Poll every 3 s while any order is still PENDING
+  clearInterval(state.pollTimer);
+  if (orders.some(o => o.status === "PENDING")) state.pollTimer = setInterval(loadOrders, 3000);
+}
+
+/* ---------- Page state ---------- */
+function render() {
+  const token = getToken();
+  $("loginView").classList.toggle("hidden", !!token);
+  $("shopView").classList.toggle("hidden", !token);
+  $("signOutBtn").classList.toggle("hidden", !token);
+  $("hostedBtn").classList.toggle("hidden", !CONFIG.HOSTED_UI_DOMAIN);
+  $("who").textContent = token ? decodeJwt(token).email || "" : "";
+  if (token) { loadProducts(); loadOrders(); }
+}
+
+$("signInBtn").onclick = signIn;
+$("password").addEventListener("keydown", e => { if (e.key === "Enter") signIn(); });
+$("hostedBtn").onclick = hostedSignIn;
+$("signOutBtn").onclick = signOut;
+$("reloadProductsBtn").onclick = loadProducts;
+$("reloadOrdersBtn").onclick = loadOrders;
+$("placeOrderBtn").onclick = placeOrder;
+$("productRows").addEventListener("click", e => {
+  const b = e.target.closest("button[data-id]");
+  if (b) changeQty(b.dataset.id, Number(b.dataset.d));
+});
+
+(async () => {
+  if (!CONFIG.CLIENT_ID || !CONFIG.API_URL) {
+    showMsg("Setup needed: fill CLIENT_ID and API_URL in the CONFIG block of index.html, then upload it again.", "error");
+  }
+  await finishHostedSignIn();
+  render();
+})();
+</script>
+</body>
+</html>
