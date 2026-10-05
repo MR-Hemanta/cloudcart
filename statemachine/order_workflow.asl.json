@@ -1,0 +1,133 @@
+{
+  "Comment": "CloudCart order workflow. Console (Block H): replace the 4 dollar-brace placeholders (ReserveStockFnArn, ReceiptFnArn, OrdersTableName, OrderEventsTopicArn) with your values. SAM (Block L): leave them, DefinitionSubstitutions fills them.",
+  "StartAt": "ReserveStock",
+  "States": {
+    "ReserveStock": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ReserveStockFnArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["OutOfStock"],
+          "ResultPath": "$.error",
+          "Next": "MarkFailed"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "GenerateReceipt"
+    },
+    "GenerateReceipt": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ReceiptFnArn}",
+        "Payload.$": "$"
+      },
+      "ResultSelector": {
+        "key.$": "$.Payload.receiptKey"
+      },
+      "ResultPath": "$.receipt",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "MarkConfirmed"
+    },
+    "MarkConfirmed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "orderId": { "S.$": "$.orderId" }
+        },
+        "UpdateExpression": "SET #s = :s, receiptKey = :r, total = :t",
+        "ExpressionAttributeNames": { "#s": "status" },
+        "ExpressionAttributeValues": {
+          ":s": { "S": "CONFIRMED" },
+          ":r": { "S.$": "$.receipt.key" },
+          ":t": { "N.$": "States.Format('{}', $.total)" }
+        }
+      },
+      "ResultPath": null,
+      "Next": "NotifySuccess"
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${OrderEventsTopicArn}",
+        "Subject": "CloudCart: order confirmed",
+        "Message.$": "States.Format('Order {} is CONFIRMED. Total: {}. Receipt: {}', $.orderId, $.total, $.receipt.key)"
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "MarkFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${OrdersTableName}",
+        "Key": {
+          "orderId": { "S.$": "$.orderId" }
+        },
+        "UpdateExpression": "SET #s = :s, reason = :r",
+        "ExpressionAttributeNames": { "#s": "status" },
+        "ExpressionAttributeValues": {
+          ":s": { "S": "FAILED" },
+          ":r": { "S.$": "$.error.Error" }
+        }
+      },
+      "ResultPath": null,
+      "Next": "NotifyFailure"
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${OrderEventsTopicArn}",
+        "Subject": "CloudCart: order failed",
+        "Message.$": "States.Format('Order {} FAILED: {}', $.orderId, $.error.Error)"
+      },
+      "ResultPath": null,
+      "Next": "OrderFailed"
+    },
+    "OrderFailed": {
+      "Type": "Fail",
+      "Error": "OrderFailed",
+      "Cause": "Stock reservation or receipt failed. See the order's reason field."
+    }
+  }
+}
